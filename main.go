@@ -1,14 +1,6 @@
-// Copyright 2015 The Gorilla WebSocket Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-//go:build ignore
-// +build ignore
-
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -17,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/gregszalay/ocpp-charging-station-simulator/stationmessages"
 	"github.com/gregszalay/ocpp-messages-go/types/StatusNotificationRequest"
@@ -37,7 +30,7 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 
 	u := url.URL{Scheme: "ws", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
-	fmt.Printf("connecting to %s", u.String())
+	fmt.Printf("connecting to %s\n", u.String())
 
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
@@ -55,12 +48,12 @@ func main() {
 				log.Println("read:", err)
 				return
 			}
-			fmt.Printf("Received message: \n%s\n", message)
+			fmt.Printf("\nReceived message: \n%s\n", message)
 		}
 	}()
 
 	// Sending BootNotificationRequest
-	fmt.Println("Creating BootNotificationRequest...")
+	fmt.Println("\nCreating BootNotificationRequest...")
 	boot_req := stationmessages.Create_BootNotificationRequest()
 	fmt.Printf("Creating message: \n%s\n", boot_req)
 	boot_err := c.WriteMessage(websocket.TextMessage, boot_req)
@@ -73,16 +66,7 @@ func main() {
 
 	runTXsimulation(c)
 
-	// Cleanly close the connection by sending a close message and then
-	// waiting (with timeout) for the server to close the connection.
-	close_err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	if close_err != nil {
-		log.Println("write close:", close_err)
-		return
-	}
-
-	return
-
+	// HeartbeatRequest time interval
 	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
 
@@ -91,8 +75,9 @@ func main() {
 		case <-done:
 			return
 		case t := <-ticker.C:
-			fmt.Println("Creating HeartbeatRequest...")
+			fmt.Println("\nCreating HeartbeatRequest...")
 			fmt.Println(t)
+			fmt.Println()
 			err := c.WriteMessage(websocket.TextMessage, stationmessages.Create_HeartbeatRequest())
 			if err != nil {
 				log.Println("write:", err)
@@ -113,17 +98,17 @@ func main() {
 			case <-time.After(time.Second):
 			}
 			return
-		default:
-			if simulationinprogress == false {
-				fmt.Print("Please type 'charge' to start charging simulation")
-				input := bufio.NewScanner(os.Stdin)
-				input.Scan()
-				user_input := input.Text()
-				fmt.Println(user_input)
-				if user_input == "charge" {
-					runTXsimulation(c)
-				}
-			}
+			// default:
+			// 	if simulationinprogress == false {
+			// 		fmt.Print("Please type 'charge' to start charging simulation")
+			// 		input := bufio.NewScanner(os.Stdin)
+			// 		input.Scan()
+			// 		user_input := input.Text()
+			// 		fmt.Println(user_input)
+			// 		if user_input == "charge" {
+			// 			runTXsimulation(c)
+			// 		}
+			// 	}
 
 		}
 	}
@@ -132,10 +117,13 @@ func main() {
 func runTXsimulation(c *websocket.Conn) {
 
 	simulationinprogress = true
+
+	transaction_id := uuid.New().String()
+
 	// Starting transaction - E02 - Cable Plugin First
 
 	// Sending StatusNotificationRequest
-	fmt.Println("Creating StatusNotificationRequest...")
+	fmt.Println("\nCreating StatusNotificationRequest...")
 	status_req := stationmessages.Create_StatusNotificationRequest(
 		StatusNotificationRequest.ConnectorStatusEnumType_1_Occupied)
 	fmt.Printf("Sending message: \n%s\n", status_req)
@@ -148,12 +136,12 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending TransactionEventRequest - Start
-	fmt.Println("Creating TransactionEventRequest...")
+	fmt.Println("\nCreating TransactionEventRequest...")
 	tx_req := stationmessages.Create_TransactionEventRequest(
 		TransactionEventRequest.TransactionEventEnumType_1_Started,
 		0,
 		22.0,
-		TransactionEventRequest.TriggerReasonEnumType_1_CablePluggedIn, "TX004")
+		TransactionEventRequest.TriggerReasonEnumType_1_CablePluggedIn, transaction_id)
 	fmt.Printf("Sending message: \n%s\n", tx_req)
 	tx_err := c.WriteMessage(websocket.TextMessage, tx_req)
 	if tx_err != nil {
@@ -164,7 +152,7 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending AuthorizeRequest
-	fmt.Println("Creating AuthorizeRequest...")
+	fmt.Println("\nCreating AuthorizeRequest...")
 	auth_req := stationmessages.Create_AuthorizeRequest()
 	fmt.Printf("Sending message: \n%s\n", auth_req)
 	auth_err := c.WriteMessage(websocket.TextMessage, auth_req)
@@ -176,12 +164,12 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending TransactionEventRequest - Update
-	fmt.Println("Creating TransactionEventRequest...")
+	fmt.Println("\nCreating TransactionEventRequest...")
 	tx2_req := stationmessages.Create_TransactionEventRequest(
 		TransactionEventRequest.TransactionEventEnumType_1_Updated,
 		0.1,
 		22.0,
-		TransactionEventRequest.TriggerReasonEnumType_1_Authorized, "TX004")
+		TransactionEventRequest.TriggerReasonEnumType_1_Authorized, transaction_id)
 	fmt.Printf("Sending message: \n%s\n", tx2_req)
 	tx2_err := c.WriteMessage(websocket.TextMessage, tx2_req)
 	if tx2_err != nil {
@@ -192,12 +180,12 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending TransactionEventRequest - Update
-	fmt.Println("Creating TransactionEventRequest...")
+	fmt.Println("\nCreating TransactionEventRequest...")
 	tx3_req := stationmessages.Create_TransactionEventRequest(
 		TransactionEventRequest.TransactionEventEnumType_1_Updated,
 		0.1,
 		22.0,
-		TransactionEventRequest.TriggerReasonEnumType_1_ChargingStateChanged, "TX004")
+		TransactionEventRequest.TriggerReasonEnumType_1_ChargingStateChanged, transaction_id)
 	fmt.Printf("Sending message: \n%s\n", tx3_req)
 	tx3_err := c.WriteMessage(websocket.TextMessage, tx3_req)
 	if tx3_err != nil {
@@ -208,7 +196,7 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending AuthorizeRequest - stop
-	fmt.Println("Creating AuthorizeRequest...")
+	fmt.Println("\nCreating AuthorizeRequest...")
 	auth_stop_req := stationmessages.Create_AuthorizeRequest()
 	fmt.Printf("Sending message: \n%s\n", auth_stop_req)
 	auth_stop_err := c.WriteMessage(websocket.TextMessage, auth_stop_req)
@@ -220,12 +208,12 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending TransactionEventRequest - Update
-	fmt.Println("Creating TransactionEventRequest...")
+	fmt.Println("\nCreating TransactionEventRequest...")
 	tx4_req := stationmessages.Create_TransactionEventRequest(
 		TransactionEventRequest.TransactionEventEnumType_1_Updated,
 		0.1,
 		22.0,
-		TransactionEventRequest.TriggerReasonEnumType_1_StopAuthorized, "TX004")
+		TransactionEventRequest.TriggerReasonEnumType_1_StopAuthorized, transaction_id)
 	fmt.Printf("Sending message: \n%s\n", tx4_req)
 	tx4_err := c.WriteMessage(websocket.TextMessage, tx4_req)
 	if tx4_err != nil {
@@ -236,7 +224,7 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending StatusNotificationRequest - unplugged
-	fmt.Println("Creating StatusNotificationRequest...")
+	fmt.Println("\nCreating StatusNotificationRequest...")
 	status_unplugged_req := stationmessages.Create_StatusNotificationRequest(
 		StatusNotificationRequest.ConnectorStatusEnumType_1_Available)
 	fmt.Printf("Sending message: \n%s\n", status_unplugged_req)
@@ -249,12 +237,12 @@ func runTXsimulation(c *websocket.Conn) {
 	time.Sleep(time.Second * 5)
 
 	// Sending TransactionEventRequest - End
-	fmt.Println("Creating TransactionEventRequest...")
+	fmt.Println("\nCreating TransactionEventRequest...")
 	tx5_req := stationmessages.Create_TransactionEventRequest(
 		TransactionEventRequest.TransactionEventEnumType_1_Ended,
 		0.1,
 		22.0,
-		TransactionEventRequest.TriggerReasonEnumType_1_EVCommunicationLost, "TX004")
+		TransactionEventRequest.TriggerReasonEnumType_1_EVCommunicationLost, transaction_id)
 	fmt.Printf("Sending message: \n%s\n", tx5_req)
 	tx5_err := c.WriteMessage(websocket.TextMessage, tx5_req)
 	if tx5_err != nil {

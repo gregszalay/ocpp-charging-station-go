@@ -7,6 +7,16 @@ import (
 )
 
 func Create_BootNotificationRequest() []byte {
+
+	//TODO
+	// content, err := ioutil.ReadFile("localconfig.json")
+
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	//fmt.Println(string(content))
+
 	bootNotificationRequest := BootNotificationRequest.BootNotificationRequestJson{
 		Reason: "PowerUp",
 		ChargingStation: BootNotificationRequest.ChargingStationType{
