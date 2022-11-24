@@ -11,7 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/gregszalay/ocpp-charging-station-simulator/stationmessages"
+	"github.com/gregszalay/ocpp-charging-station-go/chargingstation"
+	"github.com/gregszalay/ocpp-charging-station-go/stationmessages"
 	"github.com/gregszalay/ocpp-messages-go/types/StatusNotificationRequest"
 	"github.com/gregszalay/ocpp-messages-go/types/TransactionEventRequest"
 )
@@ -23,6 +24,7 @@ var ocpp_station_id = flag.String("id", "CS001", "id of the charging station")
 var simulationinprogress bool = false
 
 func main() {
+
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -32,25 +34,9 @@ func main() {
 	u := url.URL{Scheme: "ws", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
 	fmt.Printf("connecting to %s\n", u.String())
 
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		log.Fatal("dial:", err)
-	}
-	defer c.Close()
-
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		for {
-			_, message, err := c.ReadMessage()
-			if err != nil {
-				log.Println("read:", err)
-				return
-			}
-			fmt.Printf("\nReceived message: \n%s\n", message)
-		}
-	}()
+	chargingstation.ChargingStation(u)
+	
+	return
 
 	// Sending BootNotificationRequest
 	fmt.Println("\nCreating BootNotificationRequest...")

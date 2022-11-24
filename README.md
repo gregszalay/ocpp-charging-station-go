@@ -1,4 +1,4 @@
-# ocpp-charging-station-simulator
+# ocpp-charging-station-go
 
 Simulates OCPP 2.0.1 client connections
 
