@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/gregszalay/ocpp-messages-go/wrappers"
@@ -15,67 +16,86 @@ type AsyncOcppCall struct {
 	Message         wrappers.CALL
 	SuccessCallback func(wrappers.CALLRESULT)
 	ErrorCallback   func(wrappers.CALLERROR)
+	SentAt          time.Time
 }
 
-var calls_to_send chan AsyncOcppCall
-var calls_awaiting_response map[string]AsyncOcppCall
-var incoming_call_handlers map[string]func(wrappers.CALL)
+type OCPPClient struct {
+	calls_to_send           chan AsyncOcppCall
+	calls_awaiting_response map[string]AsyncOcppCall
+	Calls_received          chan wrappers.CALL
+	ws_conn                 *websocket.Conn
+}
 
-func Connect(u url.URL, handlers map[string]func(wrappers.CALL)) {
+func CreateOCPPClient() (*OCPPClient, error) {
+	// Create new OCPPClient
+	new_ocpp_client := &OCPPClient{
+		calls_to_send:           make(chan AsyncOcppCall),       // Initialize the outbound message channel
+		calls_awaiting_response: make(map[string]AsyncOcppCall), // Initialize sent call message storage
+		Calls_received:          make(chan wrappers.CALL),
+		ws_conn:                 nil,
+	}
+	return new_ocpp_client, nil
+}
 
-	// Initialize the callresult handlers
-	incoming_call_handlers = handlers
-
+func (client *OCPPClient) ConnectToCSMS(_csms_url url.URL) {
 	// Create the WS connection
-	ws_conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	ws_conn_new, _, err := websocket.DefaultDialer.Dial(_csms_url.String(), nil)
 	if err != nil {
 		log.Fatal("dial:", err)
 	}
-	defer ws_conn.Close()
-
+	client.ws_conn = ws_conn_new
+	defer client.ws_conn.Close()
 	// Start the threads
-	go runInbox(ws_conn)
-	go runOutbox(ws_conn)
+	go client.runInbox()
+	go client.runOutbox()
+	go client.timeoutCheckLoop()
 }
 
-func Disconnect() {
-
+func (client *OCPPClient) Disconnect() {
+	client.ws_conn.Close()
 }
 
-func Send(call AsyncOcppCall) {
-	calls_to_send <- call
+func (client *OCPPClient) Send(call AsyncOcppCall) {
+	client.calls_to_send <- call
 }
 
-func runOutbox(ws_conn *websocket.Conn) {
-	// initialize the outbound message channel
-	calls_to_send = make(chan AsyncOcppCall)
-	for ocpp_call := range calls_to_send {
-		err := ws_conn.WriteMessage(websocket.TextMessage, ocpp_call.Message.Marshal())
+func (client *OCPPClient) runOutbox() {
+	for ocpp_call := range client.calls_to_send {
+		err := client.ws_conn.WriteMessage(websocket.TextMessage, ocpp_call.Message.Marshal())
 		if err != nil {
 			log.Println("write:", err)
 			return
 		}
-		calls_awaiting_response[ocpp_call.Message.MessageId] = ocpp_call
+		ocpp_call.SentAt = time.Now()
+		client.calls_awaiting_response[ocpp_call.Message.MessageId] = ocpp_call
 	}
-
 }
 
-func runInbox(ws_conn *websocket.Conn) {
-	calls_awaiting_response = make(map[string]AsyncOcppCall)
-
+func (client *OCPPClient) timeoutCheckLoop() {
 	for {
-		_, message, err := ws_conn.ReadMessage()
+		for messageId, sent_ocpp_call := range client.calls_awaiting_response {
+			if time.Since(sent_ocpp_call.SentAt) > time.Millisecond*3000 {
+				delete(client.calls_awaiting_response, messageId) // delete the timed out message
+			}
+		}
+		time.Sleep(time.Millisecond * 500)
+	}
+}
+
+func (client *OCPPClient) runInbox() {
+	for {
+		_, message, err := client.ws_conn.ReadMessage()
 		if err != nil {
 			log.Println("read:", err)
 			return
 		}
 		fmt.Printf("\nReceived message: \n%s\n", message)
-		processIncomingMessage(message)
+		client.processIncomingMessage(message)
 	}
 }
 
-func processIncomingMessage(message []byte) {
-	messageTypeId, action, err := parseMessageTypeIdAction(message)
+func (client *OCPPClient) processIncomingMessage(message []byte) {
+	messageTypeId, err := parseMessageTypeId(message)
 	if err != nil {
 		log.Error("could not parse message type id")
 	}
@@ -91,8 +111,7 @@ func processIncomingMessage(message []byte) {
 			fmt.Println("*******************************")
 			litter.Dump(call)
 		}
-		// invoke callback
-		(incoming_call_handlers[action])(call)
+		client.Calls_received <- call
 	case wrappers.CALLRESULT_TYPE:
 		var callresult wrappers.CALLRESULT
 		call_result_unmarshal_err := callresult.UnmarshalJSON(message)
@@ -104,7 +123,7 @@ func processIncomingMessage(message []byte) {
 			litter.Dump(callresult)
 		}
 		// invoke callback
-		calls_awaiting_response[callresult.MessageId].SuccessCallback(callresult)
+		client.calls_awaiting_response[callresult.MessageId].SuccessCallback(callresult)
 	case wrappers.CALLERROR_TYPE:
 		var callerror wrappers.CALLERROR
 		callerror_result_unmarshal_err := callerror.UnmarshalJSON(message)
@@ -116,26 +135,22 @@ func processIncomingMessage(message []byte) {
 			litter.Dump(callerror)
 		}
 		// invoke callback
-		calls_awaiting_response[callerror.MessageId].ErrorCallback(callerror)
+		client.calls_awaiting_response[callerror.MessageId].ErrorCallback(callerror)
 	}
 }
 
-func parseMessageTypeIdAction(message []byte) (int, string, error) {
+func parseMessageTypeId(message []byte) (int, error) {
 	var data []interface{}
 	err := json.Unmarshal([]byte(message), &data)
 	if err != nil {
 		log.Error("could not unmarshal json", err)
-		return 0, "", err
+		return 0, err
 	}
 	messageTypeId, ok := data[0].(float64)
 	if !ok {
 		log.Error("data[0] is not a uint8", err)
-		return 0, "", err
-	}
-	action, err_action := data[2].(string)
-	if !err_action || action == "" {
-		return log.Error("CALL data[2] is not a string", err_action)
+		return 0, err
 	}
 
-	return int(messageTypeId), action, nil
+	return int(messageTypeId), nil
 }
