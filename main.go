@@ -3,24 +3,24 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/gregszalay/ocpp-charging-station-go/chargingstation"
+	log "github.com/sirupsen/logrus"
 )
 
+var debug_level = flag.String("debugl", "Info", "Debug log level")
 var ocpp_host = flag.String("h", "localhost:3000", "ocpp websocket server host")
 var ocpp_url = flag.String("u", "/ocpp", "ocpp URL")
 var ocpp_station_id = flag.String("id", "CS001", "id of the charging station")
 
-var simulationinprogress bool = false
-
 func main() {
+	setLogLevel(*debug_level)
 
 	flag.Parse()
-	log.SetFlags(0)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -28,9 +28,39 @@ func main() {
 	csms_url := url.URL{Scheme: "ws", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
 	fmt.Printf("connecting to CSMS through URL: %s\n", csms_url.String())
 
-	chargingstation.ChargingStation(csms_url)
-	
-	return
+	evseIPs := flag.Args() // e.g. "192.168.1.71:80"
+	chargingStation, err := chargingstation.CreateChargingStation(csms_url, evseIPs)
+	if err != nil {
+		log.Error("failed to create charging station: ", err)
+		return
+	}
 
-	
+	for {
+		select {
+		case <-interrupt:
+			chargingStation.ShutDown()
+			break
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+
+}
+
+func setLogLevel(levelName string) {
+	switch levelName {
+	case "Panic":
+		log.SetLevel(log.PanicLevel)
+	case "Fatal":
+		log.SetLevel(log.FatalLevel)
+	case "Error":
+		log.SetLevel(log.ErrorLevel)
+	case "Warn":
+		log.SetLevel(log.WarnLevel)
+	case "Info":
+		log.SetLevel(log.InfoLevel)
+	case "Debug":
+		log.SetLevel(log.DebugLevel)
+	case "Trace":
+		log.SetLevel(log.TraceLevel)
+	}
 }

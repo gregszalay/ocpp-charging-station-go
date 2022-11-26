@@ -22,8 +22,8 @@ type EVSE struct {
 	IsChargingEnabled                int
 	IsCharging                       int
 	IsError                          int
-	EnergyActiveNet_kwh_times100     int
-	PowerActiveImport_kw_times100    int
+	EnergyActiveNet_kwh_times100     int64
+	PowerActiveImport_kw_times100    int64
 	OnEVConnected_fire_once          func()
 	OnEVDisconnected_fire_once       func()
 	OnEVSEChargingEnabled_fire_once  func()
@@ -40,11 +40,14 @@ type EVSE struct {
 	OnEVSEChargingStopped_repeat     func()
 	OnEVSEError_repeat               func()
 	OnEVSENoError_repeat             func()
-	tcp_conn                         *net.TCPConn
-	message_awaiting_response        *AsyncEVSEMessage
-	lastMessageSentAt                time.Time
-	LatestTransactionId              string
 }
+
+var tcp_conn *net.TCPConn
+var in_channel chan string
+var out_channel chan string
+var messages_awaiting_resp chan AsyncEVSEMessage
+var lastMessageSentAt time.Time
+var status_strings chan string
 
 func ConnectNewEVSE(id int, servAddr string) (*EVSE, error) {
 	// Create new EVSE object
@@ -65,47 +68,72 @@ func ConnectNewEVSE(id int, servAddr string) (*EVSE, error) {
 		OnEVSEChargingStopped_repeat:  func() { fmt.Println("EVSEChargingStopped - No override") },
 		OnEVSEError_repeat:            func() { fmt.Println("EVSEError - No override") },
 		OnEVSENoError_repeat:          func() { fmt.Println("EVSEError - No override") },
-		tcp_conn:                      nil,
-		message_awaiting_response:     nil,
-		lastMessageSentAt:             time.Now(),
-		LatestTransactionId:           "",
 	}
+
+	in_channel = make(chan string)
+	out_channel = make(chan string)
+
 	// Connect to EVSE TCP server
 	tcpAddr, err := net.ResolveTCPAddr("tcp", servAddr)
 	if err != nil {
 		println("ResolveTCPAddr failed:", err.Error())
 		return nil, err
 	}
-	evse.tcp_conn, err = net.DialTCP("tcp", nil, tcpAddr)
+	tcp_conn, err = net.DialTCP("tcp", nil, tcpAddr)
 	if err != nil {
 		println("Dial failed:", err.Error())
 		return nil, err
 	}
-	// Start message inbox thread for this EVSE instance
-	go evse.runInbox()
-	// Run the status polling
-	go evse.statusPollLoop()
-	// return new EVSE instance
+
 	return evse, nil
 }
 
-func (evse *EVSE) Disconnect() {
-	evse.tcp_conn.Close()
+func (evse *EVSE) Start() {
+
+	go inLoop()
+	go sendloop()
+
+	// Start message inbox thread for this EVSE instance
+	go runInbox()
+
+	go evse.updatestatusloop()
+	// Run the status polling
+	go evse.statusPollLoop()
+	// return new EVSE instance
 }
 
-func (evse *EVSE) runInbox() {
+func (evse *EVSE) updatestatusloop() {
+	for status_s := range status_strings {
+		evse.updateStatus(status_s)
+	}
+}
+
+func (evse *EVSE) Disconnect() {
+	tcp_conn.Close()
+}
+
+func runInbox() {
 	reply := make([]byte, 1024)
 	for {
-		_, err := evse.tcp_conn.Read(reply)
+		_, err := tcp_conn.Read(reply)
 		if err != nil {
 			println("TCP read failed:", err.Error())
 			os.Exit(1)
 		}
 		println("reply from server=", string(reply))
+		in_channel <- string(reply)
+
+	}
+}
+
+func inLoop() {
+	for message_string := range in_channel {
 		// invoke callback
-		evse.message_awaiting_response.SuccessCallback(string(reply))
-		// empty the message holder
-		evse.message_awaiting_response = nil
+		message_awaiting := <-messages_awaiting_resp
+		message_awaiting.SuccessCallback(message_string)
+		// // empty the message holder
+		// evse.message_awaiting_response = nil
+
 	}
 }
 
@@ -117,7 +145,12 @@ func (evse *EVSE) updateStatus(statusString string) {
 		return
 	}
 
-	if IsEVConnected, err := strconv.Atoi(split_result[0]); err != nil {
+	fmt.Println("split_result[0]", split_result[0])
+	fmt.Println("split_result[1]", split_result[1])
+	fmt.Println("split_result[2]", split_result[2])
+	fmt.Println("split_result[3]", split_result[3])
+
+	if IsEVConnected, err := strconv.ParseInt(split_result[0], 10, 0); err != nil {
 		log.Error("unable to convert IsEVConnected to int", err)
 	} else {
 		if IsEVConnected == 1 && evse.IsEVConnected == 0 {
@@ -134,7 +167,7 @@ func (evse *EVSE) updateStatus(statusString string) {
 		}
 	}
 
-	if IsChargingEnabled, err := strconv.Atoi(split_result[1]); err != nil {
+	if IsChargingEnabled, err := strconv.ParseInt(split_result[1], 10, 0); err != nil {
 		log.Error("unable to convert IsChargingEnabled to int", err)
 	} else {
 		if IsChargingEnabled == 1 && evse.IsChargingEnabled == 0 {
@@ -151,7 +184,7 @@ func (evse *EVSE) updateStatus(statusString string) {
 		}
 	}
 
-	if IsCharging, err := strconv.Atoi(split_result[2]); err != nil {
+	if IsCharging, err := strconv.ParseInt(split_result[2], 10, 0); err != nil {
 		log.Error("unable to convert IsCharging to int", err)
 	} else {
 		if IsCharging == 1 && evse.IsCharging == 0 {
@@ -169,7 +202,7 @@ func (evse *EVSE) updateStatus(statusString string) {
 		}
 	}
 
-	if IsError, err := strconv.Atoi(split_result[3]); err != nil {
+	if IsError, err := strconv.ParseInt(split_result[3], 10, 0); err != nil {
 		log.Error("unable to convert IsError to int", err)
 	} else {
 		if IsError == 1 && evse.IsError == 0 {
@@ -196,13 +229,13 @@ func (evse *EVSE) updateMeterValues(meterValuesString string) {
 		return
 	}
 
-	if EnergyActiveNet_kwh_times100, err := strconv.Atoi(split_result[0]); err != nil {
+	if EnergyActiveNet_kwh_times100, err := strconv.ParseInt(split_result[0], 10, 0); err != nil {
 		log.Error("unable to convert EnergyActiveNet_kwh_times100 to int", err)
 	} else {
 		evse.EnergyActiveNet_kwh_times100 = EnergyActiveNet_kwh_times100
 	}
 
-	if PowerActiveImport_kw_times100, err := strconv.Atoi(split_result[1]); err != nil {
+	if PowerActiveImport_kw_times100, err := strconv.ParseInt(split_result[1], 10, 0); err != nil {
 		log.Error("unable to convert PowerActiveImport_kw_times100 to int", err)
 	} else {
 		evse.PowerActiveImport_kw_times100 = PowerActiveImport_kw_times100
@@ -212,16 +245,18 @@ func (evse *EVSE) updateMeterValues(meterValuesString string) {
 
 func (evse *EVSE) statusPollLoop() {
 	for {
-		if evse.message_awaiting_response != nil {
+		if len(messages_awaiting_resp) != 0 {
 			log.Error("We are waiting for a EVSE reply, so not asking status yet")
-			if time.Since(evse.lastMessageSentAt) > time.Millisecond*5000 { // timeout
-				evse.message_awaiting_response = nil
+			if time.Since(lastMessageSentAt) > time.Millisecond*5000 { // timeout
+				_ = <-messages_awaiting_resp
 			}
 		} else {
+
 			evse.send(AsyncEVSEMessage{
 				Message: "status?\n",
 				SuccessCallback: func(s string) {
-					evse.updateStatus(s)
+					status_strings <- s
+
 				},
 			})
 		}
@@ -231,10 +266,10 @@ func (evse *EVSE) statusPollLoop() {
 
 func (evse *EVSE) metertValuesPollLoop() {
 	for {
-		if evse.message_awaiting_response != nil {
+		if len(messages_awaiting_resp) != 0 {
 			log.Error("We are waiting for a EVSE reply, so not asking status yet")
-			if time.Since(evse.lastMessageSentAt) > time.Millisecond*5000 { // timeout
-				evse.message_awaiting_response = nil
+			if time.Since(lastMessageSentAt) > time.Millisecond*5000 { // timeout
+				_ = <-messages_awaiting_resp
 			}
 		} else {
 			evse.send(AsyncEVSEMessage{
@@ -249,17 +284,24 @@ func (evse *EVSE) metertValuesPollLoop() {
 }
 
 func (evse *EVSE) send(message AsyncEVSEMessage) {
-	println("writing the following message to EVSE controller: ", message)
-	_, err := evse.tcp_conn.Write([]byte(message.Message))
-	if err != nil {
-		println("Write to server failed:", err.Error())
-		os.Exit(1)
+	out_channel <- message.Message
+	messages_awaiting_resp <- message
+}
+
+func sendloop() {
+	for out_message := range out_channel {
+		fmt.Println("writing the following message to EVSE controller: ", out_message)
+		_, err := tcp_conn.Write([]byte(out_message))
+		if err != nil {
+			println("Write to server failed:", err.Error())
+			os.Exit(1)
+		}
+
 	}
-	evse.message_awaiting_response = &message
 }
 
 func (evse *EVSE) StartCharge(onSuccess func(), onFailure func()) {
-	if evse.message_awaiting_response != nil {
+	if len(messages_awaiting_resp) != 0 {
 		log.Error("We are waiting for a EVSE reply, so not asking status yet")
 	} else {
 		evse.send(AsyncEVSEMessage{
@@ -272,7 +314,7 @@ func (evse *EVSE) StartCharge(onSuccess func(), onFailure func()) {
 				}
 			},
 		})
-		evse.lastMessageSentAt = time.Now()
+		lastMessageSentAt = time.Now()
 	}
 
 }

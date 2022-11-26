@@ -1,6 +1,7 @@
 package displayserver
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -15,49 +16,58 @@ type EVSEStatusDataForUI struct {
 }
 
 type UICallbacks struct {
-	OnStartButtonPress func(int)
-	OnStopButtonPress  func(int)
-	OnGetChargeStatus  func(int) string
+	OnStartButtonPress  func(int)
+	OnStopButtonPress   func(int)
+	OnGetChargeStatus   func(int) string
+	OnGetEVSEsActiveIds func() string
 }
 
 var callbacks UICallbacks
 
 func onStart(w http.ResponseWriter, req *http.Request) {
-	// get id from path parameter
-	vars := mux.Vars(req)
-	evseId, ok := vars["evseId"]
-	if !ok {
+	if evseId, err := getEVSEIdFromReq(req); err != nil {
 		log.Error("failed to retrieve evseId from URL path parameters")
+		fmt.Fprintf(w, "Unable to find EVSE with this id")
+	} else {
+		callbacks.OnStartButtonPress(evseId)
+		w.WriteHeader(http.StatusOK)
 	}
-	log.Info("Attempting to start TX for EVSE with id ", evseId)
-	id_integer, err := strconv.Atoi(evseId)
-	if err != nil {
-		log.Error("Unable to convert evseId form string to int")
-		return
-	}
-	callbacks.OnStartButtonPress(id_integer)
-	w.WriteHeader(http.StatusOK)
 }
 
 func onStop(w http.ResponseWriter, req *http.Request) {
-	// get id from path parameter
-	vars := mux.Vars(req)
-	evseId, ok := vars["evseId"]
-	if !ok {
+	if evseId, err := getEVSEIdFromReq(req); err != nil {
 		log.Error("failed to retrieve evseId from URL path parameters")
+		fmt.Fprintf(w, "Unable to find EVSE with this id")
+	} else {
+		callbacks.OnStopButtonPress(evseId)
+		w.WriteHeader(http.StatusOK)
 	}
-	log.Info("Attempting to start TX for EVSE with id ", evseId)
-	id_integer, err := strconv.Atoi(evseId)
-	if err != nil {
-		log.Error("Unable to convert evseId form string to int")
-		return
-	}
-	callbacks.OnStopButtonPress(id_integer)
-	w.WriteHeader(http.StatusOK)
 }
 
 func onGetChargeStatus(w http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(w, callbacks.OnGetChargeStatus())
+	if evseId, err := getEVSEIdFromReq(req); err != nil {
+		log.Error("failed to retrieve evseId from URL path parameters")
+		fmt.Fprintf(w, "Unable to find EVSE with this id")
+	} else {
+		fmt.Fprintf(w, callbacks.OnGetChargeStatus(evseId))
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func onGetEVSEsActiveIds(w http.ResponseWriter, req *http.Request) {
+	fmt.Fprintf(w, callbacks.OnGetEVSEsActiveIds())
+}
+
+func getEVSEIdFromReq(req *http.Request) (int, error) {
+	if evseId, ok := mux.Vars(req)["evseId"]; !ok {
+		return -1, errors.New("failed to retrieve evseId from URL path parameters")
+	} else {
+		if id_integer, err := strconv.Atoi(evseId); !ok {
+			return -1, err
+		} else {
+			return id_integer, nil
+		}
+	}
 }
 
 func Start(_callbacks UICallbacks) {
@@ -65,5 +75,6 @@ func Start(_callbacks UICallbacks) {
 	http.HandleFunc("/start/{evseId}", onStart)
 	http.HandleFunc("/stop/{evseId}", onStop)
 	http.HandleFunc("/chargestatus/{evseId}", onGetChargeStatus)
+	http.HandleFunc("/evses/active/ids", onGetEVSEsActiveIds)
 	http.ListenAndServe(":8090", nil)
 }
