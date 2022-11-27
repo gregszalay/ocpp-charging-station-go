@@ -20,7 +20,7 @@ Simulates OCPP 2.0.1 client connections
 
 2.  Run (example)
 
-        ./main -host localhost:3000 -url /ocpp -id CS123 192.168.1.71:80 192.168.1.65:80
+        ./main -debugl info -host localhost:3000 -url /ocpp -id CS123 192.168.1.71:80 192.168.1.65:80
 
     Options:
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
@@ -77,4 +78,7 @@ func Start(_callbacks UICallbacks) {
 	http.HandleFunc("/chargestatus/{evseId}", onGetChargeStatus)
 	http.HandleFunc("/evses/active/ids", onGetEVSEsActiveIds)
 	http.ListenAndServe(":8090", nil)
+	for {
+		time.Sleep(time.Millisecond * 50)
+	}
 }
