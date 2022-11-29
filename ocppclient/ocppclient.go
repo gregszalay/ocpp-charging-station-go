@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/gregszalay/ocpp-messages-go/wrappers"
-	"github.com/sanity-io/litter"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -24,6 +24,7 @@ type OCPPClient struct {
 	calls_awaiting_response map[string]AsyncOcppCall
 	Calls_received          chan wrappers.CALL
 	ws_conn                 *websocket.Conn
+	mu                      sync.Mutex
 }
 
 func CreateAndRunOCPPClient(_csms_url url.URL) (*OCPPClient, error) {
@@ -79,13 +80,17 @@ func CreateAndRunOCPPClient(_csms_url url.URL) (*OCPPClient, error) {
 				}
 				fmt.Println("Current time: ", time.Now())
 				new_message := <-ocpp_client_new.calls_to_send
+				log.Info("==> Sending CALL message to CSMS")
+				log.Info(string(new_message.Message.MarshalPretty()))
 				err := ocpp_client_new.ws_conn.WriteMessage(websocket.TextMessage, new_message.Message.Marshal())
 				if err != nil {
 					log.Println("write:", err)
 					return
 				}
 				new_message.SentAt = time.Now()
+				ocpp_client_new.mu.Lock()
 				ocpp_client_new.calls_awaiting_response[new_message.Message.MessageId] = new_message
+				ocpp_client_new.mu.Unlock()
 			default:
 			}
 		}
@@ -94,13 +99,15 @@ func CreateAndRunOCPPClient(_csms_url url.URL) (*OCPPClient, error) {
 
 	go func() {
 		for {
+			ocpp_client_new.mu.Lock()
 			for messageId, sent_ocpp_call := range ocpp_client_new.calls_awaiting_response {
 				if time.Since(sent_ocpp_call.SentAt) > time.Millisecond*3000 {
 					delete(ocpp_client_new.calls_awaiting_response, messageId) // delete the timed out message
 				}
 			}
-			//time.Sleep(time.Millisecond * 500)
+			ocpp_client_new.mu.Unlock()
 		}
+		//time.Sleep(time.Millisecond * 500)
 	}()
 
 	return ocpp_client_new, nil
@@ -127,35 +134,45 @@ func (cl *OCPPClient) processIncomingMessage(message []byte) {
 		if call_unmarshal_err != nil {
 			fmt.Printf("Failed to unmarshal OCPP CALL message. Error: %s", call_unmarshal_err)
 		} else {
-			fmt.Println("OCPP CALL message as an OBJECT:")
-			fmt.Println("*******************************")
-			litter.Dump(call)
+			// fmt.Println("OCPP CALL message as an OBJECT:")
+			// fmt.Println("*******************************")
+			// litter.Dump(call)
 		}
 		cl.Calls_received <- call
+		log.Info("<== Received CALL message from CSMS")
+		log.Info(string(call.MarshalPretty()))
 	case wrappers.CALLRESULT_TYPE:
 		var callresult wrappers.CALLRESULT
 		call_result_unmarshal_err := callresult.UnmarshalJSON(message)
 		if call_result_unmarshal_err != nil {
 			fmt.Printf("Failed to unmarshal OCPP CALLRESULT message. Error: %s", call_result_unmarshal_err)
 		} else {
-			fmt.Println("OCPP CALLRESULT message as an OBJECT:")
-			fmt.Println("*******************************")
-			litter.Dump(callresult)
+			// fmt.Println("OCPP CALLRESULT message as an OBJECT:")
+			// fmt.Println("*******************************")
+			// litter.Dump(callresult)
 		}
 		// invoke callback
+		cl.mu.Lock()
 		cl.calls_awaiting_response[callresult.MessageId].SuccessCallback(callresult)
+		cl.mu.Unlock()
+		log.Info("<== Received CALLRESULT message from CSMS")
+		log.Info(string(callresult.MarshalPretty()))
 	case wrappers.CALLERROR_TYPE:
 		var callerror wrappers.CALLERROR
 		callerror_result_unmarshal_err := callerror.UnmarshalJSON(message)
 		if callerror_result_unmarshal_err != nil {
 			fmt.Printf("Failed to unmarshal OCPP CALLERROR message. Error: %s", callerror_result_unmarshal_err)
 		} else {
-			fmt.Println("OCPP CALLERROR message as an OBJECT:")
-			fmt.Println("*******************************")
-			litter.Dump(callerror)
+			// fmt.Println("OCPP CALLERROR message as an OBJECT:")
+			// fmt.Println("*******************************")
+			// litter.Dump(callerror)
 		}
 		// invoke callback
+		cl.mu.Lock()
 		cl.calls_awaiting_response[callerror.MessageId].ErrorCallback(callerror)
+		cl.mu.Unlock()
+		log.Info("<== Received CALLERROR message from CSMS")
+		log.Info(string(callerror.MarshalPretty()))
 	}
 }
 

@@ -1,9 +1,7 @@
 package chargingstation
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 
 	"github.com/google/uuid"
 	"github.com/gregszalay/ocpp-charging-station-go/ocppclient"
@@ -14,11 +12,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (cs *ChargingStation) authorizeWithRFID(onAuthSuccess func(), onAuthFailure func()) {
+func (cs *ChargingStation) authorizeWithRFID(rfid string, onAuthSuccess func(), onAuthFailure func()) {
 	// Create AuthorizeRequest
 	authorizeRequest := AuthorizeRequest.AuthorizeRequestJson{
 		IdToken: AuthorizeRequest.IdTokenType{
-			IdToken: readRFID(),
+			IdToken: rfid,
 			Type:    AuthorizeRequest.IdTokenEnumType_1_ISO14443,
 		},
 	}
@@ -59,15 +57,15 @@ func (cs *ChargingStation) authorizeWithRFID(onAuthSuccess func(), onAuthFailure
 	})
 }
 
-func readRFID() string {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Please touch RFID card to reader: ")
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		log.Error("RFID read failed")
-		return ""
-	}
-	fmt.Println("RFID read successfully: ")
-	fmt.Println(text)
-	return text
-}
+// func readRFID() string {
+// 	reader := bufio.NewReader(os.Stdin)
+// 	fmt.Print("Please touch RFID card to reader: ")
+// 	text, err := reader.ReadString('\n')
+// 	if err != nil {
+// 		log.Error("RFID read failed")
+// 		return ""
+// 	}
+// 	fmt.Println("RFID read successfully: ")
+// 	fmt.Println(text)
+// 	return text
+// }

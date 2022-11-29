@@ -1,7 +1,9 @@
 package chargingstation
 
 import (
+	"errors"
 	"net/url"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gregszalay/ocpp-charging-station-go/displayserver"
@@ -9,6 +11,7 @@ import (
 	"github.com/gregszalay/ocpp-charging-station-go/ocppclient"
 	"github.com/gregszalay/ocpp-charging-station-go/transactions"
 	"github.com/gregszalay/ocpp-messages-go/types/BootNotificationRequest"
+	"github.com/gregszalay/ocpp-messages-go/types/HeartbeatRequest"
 	"github.com/gregszalay/ocpp-messages-go/wrappers"
 	log "github.com/sirupsen/logrus"
 )
@@ -24,8 +27,6 @@ type ChargingStation struct {
 
 func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*ChargingStation, error) {
 
-	log.Info("1")
-
 	// Create new Charging Station
 	cs_new := &ChargingStation{
 		Csms_url:            _csms_url, //TODO more than one csms?
@@ -37,18 +38,18 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	}
 
 	// Connect EVSEs
-	// if len(evseIPs) == 0 {
-	// 	return nil, errors.New("failed to create CS, at least 1 EVSE must be provided")
-	// }
-	// for i, ip := range evseIPs {
-	// 	// TODO check evse numbering standard
-	// 	if evse, err := evsemanager.CreateAndRunEVSE(i, ip); err != nil {
-	// 		log.Error("Unable to create EVSE instance", err)
-	// 		return nil, err
-	// 	} else {
-	// 		cs_new.Evses[i] = evse
-	// 	}
-	// }
+	if len(evseIPs) == 0 {
+		return nil, errors.New("failed to create CS, at least 1 EVSE must be provided")
+	}
+	for i, ip := range evseIPs {
+		// TODO check evse numbering standard
+		if evse, err := evsemanager.CreateAndRunEVSE(i, ip); err != nil {
+			log.Error("Unable to create EVSE instance", err)
+			return nil, err
+		} else {
+			cs_new.Evses[i] = evse
+		}
+	}
 
 	// Connect OCPP Client
 	if ocpp_cl, err := ocppclient.CreateAndRunOCPPClient(_csms_url); err != nil {
@@ -61,79 +62,69 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	cs_new.SendBootNotification()
 
 	// Set up the UI logic
-	// cs_new.UI_callbacks = &displayserver.UICallbacks{
-	// 	OnStartButtonPress: func(evseId int) {
-	// 		evse := *cs_new.Evses[evseId]
-	// 		new_tx, err := cs_new.StartTransaction(&evse)
-	// 		if err != nil {
-	// 			log.Error("Unable to start new transaction")
-	// 		}
-	// 		cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
-	// 	},
-	// 	OnStopButtonPress: func(evseId int) {
-	// 		evse := *cs_new.Evses[evseId]
-	// 		tx := cs_new.EVSEIdsToTxsMap[evse.Id]
-	// 		cs_new.EndTransaction(&evse, tx)
-	// 	},
-	// 	OnGetChargeStatus: func(evseId int) string {
-	// 		evse := *cs_new.Evses[evseId]
-	// 		data := displayserver.EVSEStatusDataForUI{
-	// 			EnergyActiveNet_kwh_float:  float64(evse.EnergyActiveNet_kwh_times100) / 100,
-	// 			PowerActiveImport_kw_float: float64(evse.PowerActiveImport_kw_times100) / 100,
-	// 		}
-	// 		json_str, err := json.Marshal(data)
-	// 		if err != nil {
-	// 			log.Error("Failed to marshal UI data")
-	// 		}
-	// 		return string(json_str)
-	// 	},
-	// 	OnGetEVSEsActiveIds: func() string {
-	// 		evses := make([]int, 1)
-	// 		evseNumber := 0
-	// 		for evseId, _ := range cs_new.Evses {
-	// 			evses = append(evses, evseId)
-	// 			evseNumber++
-	// 		}
-	// 		json_str, err := json.Marshal(evses)
-	// 		if err != nil {
-	// 			log.Error("Failed to marshal UI data")
-	// 		}
-	// 		return string(json_str)
-	// 	},
-	// }
+	cs_new.UI_callbacks = &displayserver.UICallbacks{
+		OnStartButtonPress: func(evseId int, rfid string) {
+			evse := *cs_new.Evses[evseId]
+			new_tx, err := cs_new.StartTransaction(&evse, rfid)
+			if err != nil {
+				log.Error("Unable to start new transaction")
+			}
+			cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
+		},
+		OnStopButtonPress: func(evseId int, rfid string) {
+			evse := *cs_new.Evses[evseId]
+			tx := cs_new.EVSEIdsToTxsMap[evse.Id]
+			cs_new.EndTransaction(&evse, tx, rfid)
+		},
+		OnGetChargeStatus: func(evseId int) displayserver.EVSEStatusDataForUI {
+			evse := *cs_new.Evses[evseId]
+			data := displayserver.EVSEStatusDataForUI{
+				EnergyActiveNet_kwh_float:  float64(evse.EnergyActiveNet_kwh_times100) / 100,
+				PowerActiveImport_kw_float: float64(evse.PowerActiveImport_kw_times100) / 100,
+			}
+			return data
+		},
+		OnGetEVSEsActiveIds: func() []int {
+			evses := make([]int, 1)
+			evseNumber := 0
+			for evseId, _ := range cs_new.Evses {
+				evses = append(evses, evseId)
+				evseNumber++
+			}
+			return evses
+		},
+	}
 
-	// go func() {
-	// 	displayserver.Start(*cs_new.UI_callbacks)
-	// }()
+	go displayserver.Start(*cs_new.UI_callbacks)
 
-	// HEARTBEAT JOB
-	// ticker_status := time.NewTicker(time.Second)
-	// go func() {
-	// 	defer ticker_status.Stop()
-	// 	for {
-	// 		select {
-	// 		case t := <-ticker_status.C:
-	// 			_ = t
-	// 			heartbeatRequest := &HeartbeatRequest.HeartbeatRequestJson{
-	// 				CustomData: &HeartbeatRequest.CustomDataType{
-	// 					VendorId: "example-station-vendor",
-	// 				},
-	// 			}
-	// 			call_wrapper := &wrappers.CALL{
-	// 				MessageTypeId: wrappers.CALL_TYPE,
-	// 				MessageId:     uuid.New().String(),
-	// 				Action:        "Heartbeat",
-	// 				Payload:       *heartbeatRequest,
-	// 			}
-	// 			cs_new.OcppClient.Send(ocppclient.AsyncOcppCall{
-	// 				Message:         *call_wrapper,
-	// 				SuccessCallback: func(result wrappers.CALLRESULT) {},
-	// 				ErrorCallback:   func(result wrappers.CALLERROR) {},
-	// 			})
-	// 		default:
-	// 		}
-	// 	}
-	// }()
+	//HEARTBEAT JOB
+	ticker_status := time.NewTicker(time.Second * 10)
+	go func() {
+		defer ticker_status.Stop()
+		for {
+			select {
+			case t := <-ticker_status.C:
+				_ = t
+				heartbeatRequest := &HeartbeatRequest.HeartbeatRequestJson{
+					CustomData: &HeartbeatRequest.CustomDataType{
+						VendorId: "example-station-vendor",
+					},
+				}
+				call_wrapper := &wrappers.CALL{
+					MessageTypeId: wrappers.CALL_TYPE,
+					MessageId:     uuid.New().String(),
+					Action:        "Heartbeat",
+					Payload:       *heartbeatRequest,
+				}
+				cs_new.OcppClient.Send(ocppclient.AsyncOcppCall{
+					Message:         *call_wrapper,
+					SuccessCallback: func(result wrappers.CALLRESULT) {},
+					ErrorCallback:   func(result wrappers.CALLERROR) {},
+				})
+			default:
+			}
+		}
+	}()
 
 	go func() {
 

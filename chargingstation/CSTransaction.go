@@ -13,7 +13,7 @@ import (
 )
 
 // Starting transaction - E02 - Cable Plugin First
-func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE) (*transactions.Transaction, error) {
+func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string) (*transactions.Transaction, error) {
 
 	tx_new, _ := transactions.CreateTransaction(*evse)
 
@@ -36,52 +36,55 @@ func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE) (*transactio
 	})
 
 	// Read RFID string from std input. Send AuthorizeRequest to CSMS
-	cs.authorizeWithRFID(func() {
-		// ==> TXEventReq: Updated, Authorized
-		tx_event_req, _ := tx_new.MakeTransactionEventReq(
-			TransactionEventRequest.TransactionEventEnumType_1_Updated,
-			TransactionEventRequest.TriggerReasonEnumType_1_Authorized,
-		)
-		cs.OcppClient.Send(ocppclient.AsyncOcppCall{
-			Message: tx_event_req,
-			SuccessCallback: func(callresult wrappers.CALLRESULT) {
-				fmt.Println("TransactionEventReq received by CSMS")
-			},
-			ErrorCallback: func(wrappers.CALLERROR) {
-				log.Error("TransactionEventReq NOT received by CSMS")
-			}})
+	cs.authorizeWithRFID(
+		rfid,
+		func() {
+			// ==> TXEventReq: Updated, Authorized
+			tx_event_req, _ := tx_new.MakeTransactionEventReq(
+				TransactionEventRequest.TransactionEventEnumType_1_Updated,
+				TransactionEventRequest.TriggerReasonEnumType_1_Authorized,
+			)
+			cs.OcppClient.Send(ocppclient.AsyncOcppCall{
+				Message: tx_event_req,
+				SuccessCallback: func(callresult wrappers.CALLRESULT) {
+					fmt.Println("TransactionEventReq received by CSMS")
+				},
+				ErrorCallback: func(wrappers.CALLERROR) {
+					log.Error("TransactionEventReq NOT received by CSMS")
+				}})
 
-		go func() {
-			for {
-				if tx_new.IsInProgress == false {
-					break
+			go func() {
+				for {
+					if tx_new.IsInProgress == false {
+						break
+					}
+					// ==> TXEventReq: Updated, ChargingStateChanged
+					tx_event_req, _ := tx_new.MakeTransactionEventReq(
+						TransactionEventRequest.TransactionEventEnumType_1_Updated,
+						TransactionEventRequest.TriggerReasonEnumType_1_ChargingStateChanged,
+					)
+					cs.OcppClient.Send(ocppclient.AsyncOcppCall{
+						Message: tx_event_req,
+						SuccessCallback: func(callresult wrappers.CALLRESULT) {
+							fmt.Println("TransactionEventReq received by CSMS")
+						},
+						ErrorCallback: func(wrappers.CALLERROR) {
+							log.Error("TransactionEventReq NOT received by CSMS")
+						}})
+					time.Sleep(time.Second * 5)
 				}
-				// ==> TXEventReq: Updated, ChargingStateChanged
-				tx_event_req, _ := tx_new.MakeTransactionEventReq(
-					TransactionEventRequest.TransactionEventEnumType_1_Updated,
-					TransactionEventRequest.TriggerReasonEnumType_1_ChargingStateChanged,
-				)
-				cs.OcppClient.Send(ocppclient.AsyncOcppCall{
-					Message: tx_event_req,
-					SuccessCallback: func(callresult wrappers.CALLRESULT) {
-						fmt.Println("TransactionEventReq received by CSMS")
-					},
-					ErrorCallback: func(wrappers.CALLERROR) {
-						log.Error("TransactionEventReq NOT received by CSMS")
-					}})
-				time.Sleep(time.Second * 5)
-			}
-		}()
-	}, func() {
-		log.Error("Authorization failed")
-	})
+			}()
+		}, func() {
+			log.Error("Authorization failed")
+		})
 	return tx_new, nil
 }
 
-func (cs *ChargingStation) EndTransaction(evse *evsemanager.EVSE, tx *transactions.Transaction) {
+func (cs *ChargingStation) EndTransaction(evse *evsemanager.EVSE, tx *transactions.Transaction, rfid string) {
 
 	// ==> AuthorizeReq. Read RFID string from std input. Send AuthorizeRequest to CSMS
 	cs.authorizeWithRFID(
+		rfid,
 		func() { // Auth success:
 			// ==> TXEventReq: Updated, StopAuthorized. Notify the CSMS that the driver is authorized to stop the Transaction
 			tx_event_req, _ := tx.MakeTransactionEventReq(

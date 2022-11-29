@@ -1,16 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
 	"os/signal"
-	"time"
 
+	"github.com/gregszalay/ocpp-charging-station-go/displaytest"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/gregszalay/ocpp-charging-station-go/chargingstation"
 )
 
 var debug_level = flag.String("debugl", "Info", "Debug log level")
@@ -29,30 +28,51 @@ func main() {
 	csms_url := url.URL{Scheme: "ws", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
 	fmt.Printf("connecting to CSMS through URL: %s\n", csms_url.String())
 
-	evseIPs := flag.Args() // e.g. "192.168.1.71:80"
+	// evseIPs := flag.Args() // e.g. "192.168.1.71:80"
 
-	_, err := chargingstation.CreateAndRunChargingStation(csms_url, evseIPs)
-	if err != nil {
-		log.Error("failed to create charging station: ", err)
-		return
-	}
+	// _, err := chargingstation.CreateAndRunChargingStation(csms_url, evseIPs)
+	// if err != nil {
+	// 	log.Error("failed to create charging station: ", err)
+	// 	return
+	// }
 
-	for {
-		time.Sleep(time.Millisecond * 10)
-	}
-
+	// var waitgroup sync.WaitGroup
 	// waitgroup.Add(1)
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-interrupt:
-	// 			chargingStation.ShutDown()
-	// 			break
-	// 		}
-	// 		time.Sleep(time.Millisecond * 10)
-	// 	}
-	// }()
+	// go displayserver.Start(*UI_callbacks)
+	// waitgroup.Done()
 
+	// for {
+	// 	time.Sleep(time.Millisecond * 10)
+	// }
+
+	//fmt.Println(readRFID())
+
+	displaytest.RunDisplayTest()
+
+	func() {
+		for {
+			select {
+			case <-interrupt:
+				os.Exit(1)
+			default:
+
+			}
+		}
+	}()
+
+}
+
+func readRFID() string {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Please touch RFID card to reader: ")
+	text, err := reader.ReadString('\n')
+	if err != nil {
+		log.Error("RFID read failed")
+		return ""
+	}
+	fmt.Println("RFID read successfully: ")
+	fmt.Println(text)
+	return text
 }
 
 func setLogLevel(levelName string) {
