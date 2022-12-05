@@ -22,8 +22,8 @@ type EVSE struct {
 	IsChargingEnabled                int
 	IsCharging                       int
 	IsError                          int
-	EnergyActiveNet_kwh_times100     int64
-	PowerActiveImport_kw_times100    int64
+	EnergyActiveNet_wh               int64
+	PowerActiveImport_w              int64
 	OnEVConnected_fire_once          func()
 	OnEVDisconnected_fire_once       func()
 	OnEVSEChargingEnabled_fire_once  func()
@@ -51,26 +51,32 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 	// Create new EVSE object
 	evse_new := &EVSE{
 		// Fill it up with default values
-		Id:                            id,
-		IsEVConnected:                 0,
-		IsChargingEnabled:             0,
-		IsCharging:                    0,
-		IsError:                       0,
-		EnergyActiveNet_kwh_times100:  0,
-		PowerActiveImport_kw_times100: 0,
-		OnEVConnected_repeat:          func() { fmt.Println("EVConnected - No override") },
-		OnEVDisconnected_repeat:       func() { fmt.Println("EVDisconnected - No override") },
-		OnEVSEChargingEnabled_repeat:  func() { fmt.Println("EVSEChargingEnabled - No override") },
-		OnEVSEChargingDisabled_repeat: func() { fmt.Println("EVSEChargingDisabled - No override") },
-		OnEVSEChargingStarted_repeat:  func() { fmt.Println("EVSEChargingStarted - No override") },
-		OnEVSEChargingStopped_repeat:  func() { fmt.Println("EVSEChargingStopped - No override") },
-		OnEVSEError_repeat:            func() { fmt.Println("EVSEError - No override") },
-		OnEVSENoError_repeat:          func() { fmt.Println("EVSEError - No override") },
-		tcp_conn:                      nil,
-		in_channel:                    make(chan string, 10),
-		out_channel:                   make(chan string, 10),
-		lastMessageSentAt:             time.Now(),
-		signal:                        make(chan string),
+		Id:                               id,
+		IsEVConnected:                    0,
+		IsChargingEnabled:                0,
+		IsCharging:                       0,
+		IsError:                          0,
+		EnergyActiveNet_wh:               0,
+		PowerActiveImport_w:              0,
+		OnEVConnected_fire_once:          func() { fmt.Println("EVConnected - No override (fire once)") },
+		OnEVDisconnected_fire_once:       func() { fmt.Println("EVDisconnected - No override (fire once)") },
+		OnEVSEChargingEnabled_fire_once:  func() { fmt.Println("EVSEChargingEnabled - No override (fire once)") },
+		OnEVSEChargingDisabled_fire_once: func() { fmt.Println("EVSEChargingDisabled - No override (fire once)") },
+		OnEVSEChargingStarted_fire_once:  func() { fmt.Println("EVSEChargingStarted - No override (fire once)") },
+		OnEVSEChargingStopped_fire_once:  func() { fmt.Println("EVSEChargingStopped - No override (fire once)") },
+		OnEVConnected_repeat:             func() { fmt.Println("EVConnected - No override") },
+		OnEVDisconnected_repeat:          func() { fmt.Println("EVDisconnected - No override") },
+		OnEVSEChargingEnabled_repeat:     func() { fmt.Println("EVSEChargingEnabled - No override") },
+		OnEVSEChargingDisabled_repeat:    func() { fmt.Println("EVSEChargingDisabled - No override") },
+		OnEVSEChargingStarted_repeat:     func() { fmt.Println("EVSEChargingStarted - No override") },
+		OnEVSEChargingStopped_repeat:     func() { fmt.Println("EVSEChargingStopped - No override") },
+		OnEVSEError_repeat:               func() { fmt.Println("EVSEError - No override") },
+		OnEVSENoError_repeat:             func() { fmt.Println("EVSEError - No override") },
+		tcp_conn:                         nil,
+		in_channel:                       make(chan string, 10),
+		out_channel:                      make(chan string, 10),
+		lastMessageSentAt:                time.Now(),
+		signal:                           make(chan string),
 	}
 
 	// Connect to EVSE TCP server
@@ -91,19 +97,18 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 		for {
 			n, err := evse_new.tcp_conn.Read(reply)
 			if err != nil {
-				println("TCP read failed:", err.Error())
+				log.Error("TCP read failed:", err.Error())
 				os.Exit(1)
 			}
 			if n != 0 {
 				reply_str := string(reply[:n])
-				println("reply from server = ", reply_str)
+				log.Info("reply from server = ", reply_str)
 				evse_new.in_channel <- reply_str
 				reply = make([]byte, 50)
 			}
 			//reply = nil
 			//reply = make([]byte, 50)
 		}
-		log.Info("LISTEN goroutine has finished")
 	}()
 
 	// PROCESS
@@ -116,7 +121,7 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 
 	// SEND
 	go func() { // keep looking for messages to send, send message
-		ticker_status := time.NewTicker(time.Second * 2)
+		ticker_status := time.NewTicker(time.Millisecond * 250)
 		defer ticker_status.Stop()
 		for {
 			select {
@@ -125,9 +130,9 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 				if len(evse_new.out_channel) == 0 {
 					break
 				}
-				fmt.Println("Current time: ", time.Now())
+				log.Debug("Current time: ", time.Now())
 				new_mess := <-evse_new.out_channel
-				fmt.Println("writing the following message to EVSE controller: ", new_mess)
+				log.Debug("writing the following message to EVSE controller: ", new_mess)
 				_, err := evse_new.tcp_conn.Write([]byte(new_mess))
 				if err != nil {
 					println("Write to server failed:", err.Error())
@@ -136,11 +141,10 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 			default:
 			}
 		}
-		log.Info("SEND goroutine has finished")
 	}()
 
 	// EVSE POLLING
-	ticker_status := time.NewTicker(time.Second)
+	ticker_status := time.NewTicker(time.Millisecond * 300)
 	go func() {
 		defer ticker_status.Stop()
 		for {
@@ -168,17 +172,17 @@ func (evse *EVSE) DisableCharging() {
 }
 
 func (evse *EVSE) processEVSEMessage(evse_reply string) {
-	fmt.Println("Processing string from EVSE:", evse_reply)
+	log.Trace("Processing string from EVSE:", evse_reply)
 	split_result := strings.Split(evse_reply, ":")
 	if len(split_result) < 2 {
-		log.Error("Unable to update status, status string is length is less than 2")
+		log.Debug("Unable to update status, status string is length is less than 2")
 		return
 	}
 	message_header := strings.Trim(split_result[0], " ")
 	message_body := strings.Trim(split_result[1], " ")
 
-	fmt.Println("message_header: ", message_header)
-	fmt.Println("message_body", message_body)
+	log.Trace("message_header: ", message_header)
+	log.Trace("message_body", message_body)
 
 	switch message_header {
 	case "status":
@@ -195,10 +199,10 @@ func (evse *EVSE) Disconnect() {
 }
 
 func (evse *EVSE) updateStatus(statusString string) {
-	fmt.Println("Original status string: ", statusString)
+	log.Trace("Original status string: ", statusString)
 	split_result := strings.Split(statusString, ",")
 	if len(split_result) < 4 {
-		log.Error("Unable to update status, status string is less than 4")
+		log.Debug("Unable to update status, status string is less than 4")
 		return
 	}
 
@@ -207,10 +211,10 @@ func (evse *EVSE) updateStatus(statusString string) {
 	IsCharging_new_str := strings.Trim(split_result[2], " ,")
 	IsError_new_str := strings.Trim(split_result[3], " ,\n")
 
-	fmt.Println("split_result[0]", IsEVConnected_new_str)
-	fmt.Println("split_result[1]", IsChargingEnabled_new_str)
-	fmt.Println("split_result[2]", IsCharging_new_str)
-	fmt.Println("split_result[3]", IsError_new_str)
+	log.Trace("split_result[0]", IsEVConnected_new_str)
+	log.Trace("split_result[1]", IsChargingEnabled_new_str)
+	log.Trace("split_result[2]", IsCharging_new_str)
+	log.Trace("split_result[3]", IsError_new_str)
 
 	if IsEVConnected, err := strconv.ParseInt(IsEVConnected_new_str, 10, 64); err != nil {
 		log.Error("unable to convert IsEVConnected to int", err)
@@ -284,26 +288,26 @@ func (evse *EVSE) updateStatus(statusString string) {
 }
 
 func (evse *EVSE) updateMeterValues(meterValuesString string) {
-	fmt.Println("Original meterValues string: ", meterValuesString)
+	log.Trace("Original meterValues string: ", meterValuesString)
 	split_result := strings.Split(meterValuesString, ",")
 	if len(split_result) < 2 {
 		log.Error("Unable to update metervalues, meterValuesString is less than 2")
 		return
 	}
 
-	EnergyActiveNet_kwh_times100_str := strings.Trim(split_result[0], " ,")
-	PowerActiveImport_kw_times100_str := strings.Trim(split_result[1], " ,")
+	EnergyActiveNet_wh_str := strings.Trim(split_result[0], " ,")
+	PowerActiveImport_w_str := strings.Trim(split_result[1], " ,")
 
-	if EnergyActiveNet_kwh_times100, err := strconv.ParseInt(EnergyActiveNet_kwh_times100_str, 10, 64); err != nil {
-		log.Error("unable to convert EnergyActiveNet_kwh_times100 to int", err)
+	if EnergyActiveNet_wh, err := strconv.ParseInt(EnergyActiveNet_wh_str, 10, 64); err != nil {
+		log.Error("unable to convert EnergyActiveNet_wh to int", err)
 	} else {
-		evse.EnergyActiveNet_kwh_times100 = EnergyActiveNet_kwh_times100
+		evse.EnergyActiveNet_wh = EnergyActiveNet_wh
 	}
 
-	if PowerActiveImport_kw_times100, err := strconv.ParseInt(PowerActiveImport_kw_times100_str, 10, 64); err != nil {
-		log.Error("unable to convert PowerActiveImport_kw_times100 to int", err)
+	if PowerActiveImport_w, err := strconv.ParseInt(PowerActiveImport_w_str, 10, 64); err != nil {
+		log.Error("unable to convert PowerActiveImport_w to int", err)
 	} else {
-		evse.PowerActiveImport_kw_times100 = PowerActiveImport_kw_times100
+		evse.PowerActiveImport_w = PowerActiveImport_w
 	}
 
 }

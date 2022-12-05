@@ -2,6 +2,8 @@ package chargingstation
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/gregszalay/ocpp-charging-station-go/evsemanager"
@@ -15,7 +17,7 @@ import (
 // Starting transaction - E02 - Cable Plugin First
 func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string) (*transactions.Transaction, error) {
 
-	tx_new, _ := transactions.CreateTransaction(*evse)
+	tx_new, _ := transactions.CreateTransaction(evse)
 
 	// Send StatusNotificationRequest
 	cs.SendStatusNotification(evse)
@@ -39,6 +41,9 @@ func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string)
 	cs.authorizeWithRFID(
 		rfid,
 		func() {
+
+			tx_new.IsInProgress = true
+
 			// ==> TXEventReq: Updated, Authorized
 			tx_event_req, _ := tx_new.MakeTransactionEventReq(
 				TransactionEventRequest.TransactionEventEnumType_1_Updated,
@@ -53,11 +58,24 @@ func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string)
 					log.Error("TransactionEventReq NOT received by CSMS")
 				}})
 
-			go func() {
-				for {
-					if tx_new.IsInProgress == false {
-						break
-					}
+		}, func() {
+			log.Error("Authorization failed")
+		})
+
+	go func() {
+		// TX update job
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+		ticker_status := time.NewTicker(time.Second * 5)
+		defer ticker_status.Stop()
+		for {
+			select {
+			case t := <-ticker_status.C:
+				_ = t
+				if tx_new.IsInProgress == false {
+					return
+				} else {
+
 					// ==> TXEventReq: Updated, ChargingStateChanged
 					tx_event_req, _ := tx_new.MakeTransactionEventReq(
 						TransactionEventRequest.TransactionEventEnumType_1_Updated,
@@ -71,12 +89,14 @@ func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string)
 						ErrorCallback: func(wrappers.CALLERROR) {
 							log.Error("TransactionEventReq NOT received by CSMS")
 						}})
-					time.Sleep(time.Second * 5)
 				}
-			}()
-		}, func() {
-			log.Error("Authorization failed")
-		})
+			case <-interrupt:
+				return
+			default:
+			}
+		}
+	}()
+
 	return tx_new, nil
 }
 
