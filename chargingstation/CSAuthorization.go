@@ -56,16 +56,3 @@ func (cs *ChargingStation) authorizeWithRFID(rfid string, onAuthSuccess func(), 
 		},
 	})
 }
-
-// func readRFID() string {
-// 	reader := bufio.NewReader(os.Stdin)
-// 	fmt.Print("Please touch RFID card to reader: ")
-// 	text, err := reader.ReadString('\n')
-// 	if err != nil {
-// 		log.Error("RFID read failed")
-// 		return ""
-// 	}
-// 	fmt.Println("RFID read successfully: ")
-// 	fmt.Println(text)
-// 	return text
-// }

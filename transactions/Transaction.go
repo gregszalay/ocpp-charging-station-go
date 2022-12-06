@@ -11,20 +11,18 @@ import (
 
 type Transaction struct {
 	Id           string
-	Evse         evsemanager.EVSE
+	Evse         *evsemanager.EVSE
 	TxSeqNo      int
 	IsInProgress bool
 }
 
-func CreateTransaction(evse evsemanager.EVSE) (*Transaction, error) {
-
+func CreateTransaction(evse *evsemanager.EVSE) (*Transaction, error) {
 	tx_new := &Transaction{
 		Id:           uuid.New().String(), // Generate new UUID for the transaction
 		Evse:         evse,
 		TxSeqNo:      0,
 		IsInProgress: false,
 	}
-
 	return tx_new, nil
 }
 
@@ -42,18 +40,18 @@ func (tx *Transaction) MakeTransactionEventReq(
 					tx_lib.SampledValueType{
 						Measurand: &energy_active_net_type,
 						UnitOfMeasure: &tx_lib.UnitOfMeasureType{
-							Multiplier: 3,
+							Multiplier: 0,
 							Unit:       "Wh",
 						},
-						Value: float64(tx.Evse.EnergyActiveNet_kwh_times100) / 100,
+						Value: float64(tx.Evse.EnergyActiveNet_wh),
 					},
 					tx_lib.SampledValueType{
 						Measurand: &power_active_import_type,
 						UnitOfMeasure: &tx_lib.UnitOfMeasureType{
-							Multiplier: 3,
+							Multiplier: 0,
 							Unit:       "W",
 						},
-						Value: float64(tx.Evse.PowerActiveImport_kw_times100) / 100,
+						Value: float64(tx.Evse.PowerActiveImport_w),
 					},
 				},
 				Timestamp: time.Now().Format(time.RFC3339),
@@ -79,15 +77,3 @@ func (tx *Transaction) MakeTransactionEventReq(
 	return call_wrapper, nil
 
 }
-
-// cs.OcppClient.Send(ocppclient.AsyncOcppCall{
-// 	Message: *call_wrapper,
-// 	SuccessCallback: func(callresult wrappers.CALLRESULT) {
-// 		fmt.Println("TransactionEventReq received by CSMS")
-// 		onSuccess()
-// 	},
-// 	ErrorCallback: func(wrappers.CALLERROR) {
-// 		log.Error("TransactionEventReq NOT received by CSMS")
-// 		onFailure()
-// 	},
-// })

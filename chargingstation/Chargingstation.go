@@ -25,10 +25,12 @@ type ChargingStation struct {
 	EVSEIdsToTxsMap     map[int]*transactions.Transaction
 }
 
+var cs_new *ChargingStation
+
 func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*ChargingStation, error) {
 
 	// Create new Charging Station
-	cs_new := &ChargingStation{
+	cs_new = &ChargingStation{
 		Csms_url:            _csms_url, //TODO more than one csms?
 		Evses:               make(map[int]*evsemanager.EVSE),
 		OcppClient:          nil,
@@ -64,28 +66,34 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	// Set up the UI logic
 	cs_new.UI_callbacks = &displayserver.UICallbacks{
 		OnStartButtonPress: func(evseId int, rfid string) {
-			evse := *cs_new.Evses[evseId]
-			new_tx, err := cs_new.StartTransaction(&evse, rfid)
+			evse := cs_new.Evses[evseId]
+			evse.EnableCharging()
+			new_tx, err := cs_new.StartTransaction(evse, rfid)
 			if err != nil {
 				log.Error("Unable to start new transaction")
 			}
 			cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
 		},
 		OnStopButtonPress: func(evseId int, rfid string) {
-			evse := *cs_new.Evses[evseId]
+			evse := cs_new.Evses[evseId]
+			evse.DisableCharging()
 			tx := cs_new.EVSEIdsToTxsMap[evse.Id]
-			cs_new.EndTransaction(&evse, tx, rfid)
+			cs_new.EndTransaction(evse, tx, rfid)
 		},
 		OnGetChargeStatus: func(evseId int) displayserver.EVSEStatusDataForUI {
-			evse := *cs_new.Evses[evseId]
+			evse := cs_new.Evses[evseId]
 			data := displayserver.EVSEStatusDataForUI{
-				EnergyActiveNet_kwh_float:  float64(evse.EnergyActiveNet_kwh_times100) / 100,
-				PowerActiveImport_kw_float: float64(evse.PowerActiveImport_kw_times100) / 100,
+				IsEVConnected:              evse.IsEVConnected,
+				IsChargingEnabled:          evse.IsChargingEnabled,
+				IsCharging:                 evse.IsCharging,
+				IsError:                    evse.IsError,
+				EnergyActiveNet_kwh_float:  float64(evse.EnergyActiveNet_wh) / 1000,
+				PowerActiveImport_kw_float: float64(evse.PowerActiveImport_w) / 1000,
 			}
 			return data
 		},
 		OnGetEVSEsActiveIds: func() []int {
-			evses := make([]int, 1)
+			evses := make([]int, 0)
 			evseNumber := 0
 			for evseId, _ := range cs_new.Evses {
 				evses = append(evses, evseId)
@@ -97,9 +105,11 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 
 	go displayserver.Start(*cs_new.UI_callbacks)
 
+	log.Info("got here ")
+
 	//HEARTBEAT JOB
-	ticker_status := time.NewTicker(time.Second * 10)
 	go func() {
+		ticker_status := time.NewTicker(time.Second * 10)
 		defer ticker_status.Stop()
 		for {
 			select {
@@ -116,10 +126,11 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 					Action:        "Heartbeat",
 					Payload:       *heartbeatRequest,
 				}
+				log.Info("Sending heartbeat")
 				cs_new.OcppClient.Send(ocppclient.AsyncOcppCall{
 					Message:         *call_wrapper,
-					SuccessCallback: func(result wrappers.CALLRESULT) {},
-					ErrorCallback:   func(result wrappers.CALLERROR) {},
+					SuccessCallback: func(result wrappers.CALLRESULT) { log.Info("Heartbeat message sent") },
+					ErrorCallback:   func(result wrappers.CALLERROR) { log.Info("Heartbeat message not sent") },
 				})
 			default:
 			}
@@ -127,7 +138,6 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	}()
 
 	go func() {
-
 		for ocpp_call_from_CSMS := range cs_new.OcppClient.Calls_received {
 			switch ocpp_call_from_CSMS.Action {
 			case "SetVariables":
