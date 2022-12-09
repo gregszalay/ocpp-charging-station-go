@@ -1,8 +1,11 @@
 package ocppclient
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"sync"
 	"time"
@@ -36,7 +39,28 @@ func CreateAndRunOCPPClient(_csms_url url.URL) (*OCPPClient, error) {
 		ws_conn:                 nil,
 	}
 
-	ws_conn_new, _, err := websocket.DefaultDialer.Dial(_csms_url.String(), nil)
+	// Read the key pair to create certificate
+	cert, err := tls.LoadX509KeyPair("client_cert.pem", "key.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a CA certificate pool and add cert.pem to it
+	caCert, err := ioutil.ReadFile("client_cert.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+	
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{
+			ClientCAs:    caCertPool,
+			Certificates: []tls.Certificate{cert},
+		},
+	}
+
+	ws_conn_new, _, err := dialer.Dial(_csms_url.String(), nil)
 	if err != nil {
 		log.Fatal("dial:", err)
 		return nil, err
