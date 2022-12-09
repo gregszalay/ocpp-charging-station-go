@@ -24,7 +24,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	csms_url := url.URL{Scheme: "ws", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
+	csms_url := url.URL{Scheme: "wss", Host: *ocpp_host, Path: *ocpp_url + "/" + *ocpp_station_id}
 	fmt.Printf("connecting to CSMS through URL: %s\n", csms_url.String())
 
 	evseIPs := flag.Args() // e.g. "192.168.1.71:80"
