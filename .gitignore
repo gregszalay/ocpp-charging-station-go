@@ -1,3 +1,8 @@
+# ignore all files without an extension
+*
+!/**/
+!*.*
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -5,6 +10,10 @@
 *.so
 *.dylib
 
+# IDE
+.vscode/
+
+# CICD
 deploy/
 
 # Test binary, built with `go test -c`
