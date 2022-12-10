@@ -63,6 +63,12 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 
 	cs_new.SendBootNotification()
 
+	for _, evse := range cs_new.Evses {
+		cs_new.SendStatusNotification(evse)
+	}
+
+	time.Sleep(time.Millisecond * 3000)
+
 	// Set up the UI logic
 	cs_new.UI_callbacks = &displayserver.UICallbacks{
 		OnStartButtonPress: func(evseId int, rfid string) {
