@@ -62,27 +62,35 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	}
 
 	cs_new.SendBootNotification()
+	time.Sleep(time.Millisecond * 3000)
 
 	for _, evse := range cs_new.Evses {
 		cs_new.SendStatusNotification(evse)
+		evse.OnEVConnected_repeat = func() {
+			cs_new.SendStatusNotification(evse)
+			new_tx, _ := cs_new.StartTransaction(evse)
+			cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
+		}
+		evse.OnEVDisconnected_repeat = func() {
+			cs_new.SendStatusNotification(evse)
+		}
 	}
-
-	time.Sleep(time.Millisecond * 3000)
 
 	// Set up the UI logic
 	cs_new.UI_callbacks = &displayserver.UICallbacks{
 		OnStartButtonPress: func(evseId int, rfid string) {
 			evse := cs_new.Evses[evseId]
-			new_tx, err := cs_new.StartTransaction(evse, rfid)
-			if err != nil {
-				log.Error("Unable to start new transaction")
+			tx := cs_new.EVSEIdsToTxsMap[evse.Id]
+			if evse.IsEVConnected == 1 {
+				cs_new.AuthorizeTransaction(tx, evse, rfid)
 			} else {
-				cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
+				evse.OnEVConnected_fire_once = func() {
+					cs_new.AuthorizeTransaction(tx, evse, rfid)
+				}
 			}
 		},
 		OnStopButtonPress: func(evseId int, rfid string) {
 			evse := cs_new.Evses[evseId]
-			evse.DisableCharging()
 			tx := cs_new.EVSEIdsToTxsMap[evse.Id]
 			cs_new.EndTransaction(evse, tx, rfid)
 		},
@@ -115,7 +123,7 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 
 	//HEARTBEAT JOB
 	go func() {
-		ticker_status := time.NewTicker(time.Second * 10)
+		ticker_status := time.NewTicker(time.Second * 60 * 5)
 		defer ticker_status.Stop()
 		for {
 			select {
