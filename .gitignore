@@ -27,6 +27,7 @@ deploy/
 
 # credentials
 *.pem
+*.pwd
 
 # dependencies
 */node_modules
