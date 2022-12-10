@@ -2,6 +2,7 @@ package evsemanager
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -91,6 +92,18 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 		return nil, err
 	}
 
+	// Authenticate this connection with the EVSE server
+	evse_pwd, err := ioutil.ReadFile("evse.pwd")
+	if err != nil {
+		log.Error("Unable to read EVSE password from file")
+		log.Fatal(err)
+	}
+	_, auth_err := evse_new.tcp_conn.Write([]byte(string(evse_pwd) + "\n"))
+	if auth_err != nil {
+		println("Write to server failed:", err.Error())
+		os.Exit(1)
+	}
+
 	// LISTEN
 	go func() { // listen for incoming messages and put them into a queue
 		reply := make([]byte, 50)
@@ -101,9 +114,12 @@ func CreateAndRunEVSE(id int, servAddr string) (*EVSE, error) {
 				os.Exit(1)
 			}
 			if n != 0 {
-				reply_str := string(reply[:n])
-				log.Info("reply from server = ", reply_str)
-				evse_new.in_channel <- reply_str
+				reply_str_raw := string(reply[:n])
+				reply_str := strings.TrimSpace(reply_str_raw)
+				if reply_str != "" {
+					log.Info("reply from server = ", reply_str)
+					evse_new.in_channel <- reply_str
+				}
 				reply = make([]byte, 50)
 			}
 			//reply = nil
