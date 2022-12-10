@@ -73,12 +73,12 @@ func CreateAndRunChargingStation(_csms_url url.URL, evseIPs []string) (*Charging
 	cs_new.UI_callbacks = &displayserver.UICallbacks{
 		OnStartButtonPress: func(evseId int, rfid string) {
 			evse := cs_new.Evses[evseId]
-			evse.EnableCharging()
 			new_tx, err := cs_new.StartTransaction(evse, rfid)
 			if err != nil {
 				log.Error("Unable to start new transaction")
+			} else {
+				cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
 			}
-			cs_new.EVSEIdsToTxsMap[evse.Id] = new_tx
 		},
 		OnStopButtonPress: func(evseId int, rfid string) {
 			evse := cs_new.Evses[evseId]
