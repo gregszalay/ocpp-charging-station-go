@@ -41,9 +41,8 @@ func (cs *ChargingStation) StartTransaction(evse *evsemanager.EVSE, rfid string)
 	cs.authorizeWithRFID(
 		rfid,
 		func() {
-
+			evse.EnableCharging()
 			tx_new.IsInProgress = true
-
 			// ==> TXEventReq: Updated, Authorized
 			tx_event_req, _ := tx_new.MakeTransactionEventReq(
 				TransactionEventRequest.TransactionEventEnumType_1_Updated,
@@ -106,7 +105,6 @@ func (cs *ChargingStation) EndTransaction(evse *evsemanager.EVSE, tx *transactio
 	cs.authorizeWithRFID(
 		rfid,
 		func() { // Auth success:
-			evse.EnableCharging()
 			// ==> TXEventReq: Updated, StopAuthorized. Notify the CSMS that the driver is authorized to stop the Transaction
 			tx_event_req, _ := tx.MakeTransactionEventReq(
 				TransactionEventRequest.TransactionEventEnumType_1_Updated,
