@@ -15,6 +15,7 @@
 
 # CICD
 deploy/
+raspi_local/
 
 # Test binary, built with `go test -c`
 *.test
